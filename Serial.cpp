@@ -13,7 +13,7 @@ Serial::Serial() {
 Serial::~Serial() {
 }
 //---------------------------------------------------------------------//
-bool Serial::connect(const char * device, int baudRate, struct termios * opt = NULL) {
+bool Serial::connect(const char * device, int baudRate, struct termios * opt /*= NULL*/) {
     this->fileDescriptor = open(device, O_RDWR | O_NOCTTY | O_NDELAY);
             //                            |        |          |
             //                            |        |          +--- This program doesn't care what state the DCD signal line is in.

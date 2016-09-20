@@ -39,7 +39,7 @@ public:
      * @param struct termios with options setted.
      * @return True/False on connect
     */
-    bool connect(const char *device, int baudRate, struct termios * opt);
+    bool connect(const char *device, int baudRate, struct termios * opt = NULL);
    
     /**
      * Closes the serial file descriptor.
