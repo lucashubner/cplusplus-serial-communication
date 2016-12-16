@@ -8,8 +8,10 @@
 #include "../Headers/Serial.hpp"
 
 Serial::Serial(int type /* = 0*/) {
+	this->fileDescriptor = 0;
     this->serialType = type;
-    blockUntilRead = false;
+    this->connected = false;
+    this->connectedOnce = false;
 }
 //---------------------------------------------------------------------//
 void Serial::setSerialType(int type){
@@ -34,9 +36,9 @@ bool Serial::connect(const char * device, int baudRate, struct termios * opt /*=
 
     // Get the current flags from port
     tcgetattr(this->fileDescriptor, &this->options);
-    
+
     // Default == false
-    setBlockUntilRead(blockUntilRead);
+    setBlockUntilRead(true);
 
     if(opt == NULL)
         configure();
@@ -44,8 +46,9 @@ bool Serial::connect(const char * device, int baudRate, struct termios * opt /*=
         this->options = *opt;
 
     // Set the baudrate
+    cfsetispeed(&this->options, this->getBaudRateFlag(baudRate));
     cfsetospeed(&this->options, this->getBaudRateFlag(baudRate));
-    cfsetospeed(&this->options, this->getBaudRateFlag(baudRate));
+
 
     // Set the file descriptor options
     if(tcsetattr(this->fileDescriptor, TCSANOW, &options) <0){
@@ -58,10 +61,10 @@ bool Serial::connect(const char * device, int baudRate, struct termios * opt /*=
 }
 //---------------------------------------------------------------------//
 bool Serial::connect() {
-    if(!connectedOnce | flagsSetted && deviceSetted){
+    if(!connectedOnce && (this->device.size() > 0)){
         throw SerialException("Flags not setted! Cant connect to device");
     }
-    
+
     this->fileDescriptor = open(this->device.c_str(), O_RDWR | O_NOCTTY | O_NDELAY);
                         //                            |        |          |
                         //                            |        |          +--- This program doesn't care what state the DCD signal line is in.
@@ -70,14 +73,12 @@ bool Serial::connect() {
     if(this->fileDescriptor == -1){
         throw SerialException("Can't open the port");
     }
-    
-    setBlockUntilRead(blockUntilRead);
 
     // Set the file descriptor options
     if(tcsetattr(this->fileDescriptor, TCSANOW, &options) <0){
         throw SerialException("Error setting the config flags.");
     }
-    
+
     this->connected = true;
     return true;
 }
@@ -91,6 +92,7 @@ int Serial::getArray(unsigned char* buffer, int len) {
     if(!this->connected){
         throw SerialException("Not connected, please use connect(device, baudrate) to connect");
     }
+
     return read(this->fileDescriptor,buffer,len);
 }
 //---------------------------------------------------------------------//
@@ -98,7 +100,7 @@ int Serial::sendArray(unsigned char* buffer, int len) {
     if(!this->connected){
         throw SerialException("Not connected, please use connect(device, baudrate) to connect");
     }
-    
+
     int n = write(this->fileDescriptor, buffer, len);
     if(n > 0){
        return n;
@@ -110,12 +112,19 @@ int Serial::sendArray(unsigned char* buffer, int len) {
 //---------------------------------------------------------------------//
 
 void Serial::configure(){
-    // Get the current flags from port
-    tcgetattr(this->fileDescriptor, &this->options);
+	// Clear the flags from options
+	this->options.c_cflag = 0;
+	this->options.c_iflag = 0;
 
-    this->options.c_cflag &= ~CSIZE; /* Mask the character size bits */
-    this->options.c_cflag |= CS8;    /* Select 8 data bits */
+	this->options.c_ispeed = 0;
+	this->options.c_ospeed = 0;
 
+	this->options.c_lflag = 0;
+	this->options.c_line = 0;
+	this->options.c_oflag = 0;
+
+    
+// c_cflag
     // Enable the receiver and set local mode...
     this->options.c_cflag |= (CLOCAL | CREAD);
 
@@ -125,27 +134,43 @@ void Serial::configure(){
     this->options.c_cflag &= ~CSIZE;
     this->options.c_cflag |= CS8;
 
-    // Enable hardware flow control
-    this->options.c_cflag |= CRTSCTS;
+    // Disable hardware flow control
+    this->options.c_cflag &= ~CRTSCTS;
+
+    // no signaling chars, no echo, no canonical processing
+    this->options.c_lflag = 0;
+
+// c_cc
+    // read doesn't block
+    this->options.c_cc[VMIN] = 1;
+    // 0.5 seconds read timeout
+    this->options.c_cc[VTIME] = 15;
+    
+//c_iflag
+    // Disable Software flow control
+    this->options.c_iflag &=  ~(IXON | IXOFF | IXANY);
+    
+    // Ignore BREAK condition on Input, Ignore Framing and Parity Errors·
+    this->options.c_iflag |= IGNPAR | IGNBRK;
+
+//c_oflag
 
     // Enable Raw Input
     this->options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
-
-    // Disable Software Flow control
-    this->options.c_iflag &= ~(IXON | IXOFF | IXANY);
-
+    
     // Chose raw (not processed) output
     this->options.c_oflag &= ~OPOST;
-    
+
+
 }
 //---------------------------------------------------------------------//
 void Serial::setHardwareFlowControl(bool enable){
-    this->options.c_cflag = enable? this->options.c_cflag | CRTSCTS : 
+    this->options.c_cflag = enable? this->options.c_cflag | CRTSCTS :
                                     this->options.c_cflag & ~CRTSCTS;
 }
 //---------------------------------------------------------------------//
 void Serial::setSoftwareFlowControl(bool enable){
-    this->options.c_iflag = enable? this->options.c_iflag |  (IXON | IXOFF | IXANY): 
+    this->options.c_iflag = enable? this->options.c_iflag |  (IXON | IXOFF | IXANY):
                                     this->options.c_iflag & ~(IXON | IXOFF | IXANY);
 }
 //---------------------------------------------------------------------//
@@ -155,20 +180,18 @@ void Serial::setRawOutput(bool enable){
 }
 //---------------------------------------------------------------------//
 void Serial::setBlockUntilRead(bool enable){
-    connectedOnce? 0: throw ("File Descriptor not Setted, please connect once");
-    this->blockUntilRead = enable;
+    this->fileDescriptor != -1? 0: throw ("File Descriptor not Setted, please connect once");
     enable? fcntl(this->fileDescriptor, F_SETFL, FNDELAY):
             fcntl(this->fileDescriptor, F_SETFL, 0      );
-            
+
 }
 //---------------------------------------------------------------------//
 void Serial::setDevice(std::string device) {
     this->device = device;
-    this->deviceSetted = true;
 }
 //---------------------------------------------------------------------//
 bool Serial::isConnected() {
-    return connected? true:false;
+    return connected;
 }
 //---------------------------------------------------------------------//
 long Serial::getBaudRateFlag(int baud){

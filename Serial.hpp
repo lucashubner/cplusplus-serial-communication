@@ -9,17 +9,14 @@
 #define SERIAL_HPP
 #include <unistd.h> // UNIX standard function definitions
 #include <fcntl.h> // File control definitions
-#include <errno.h> // Error number definitions
 #include <termios.h> // POSIX terminal control definitionss
 #include <time.h>   // time calls
 #include <iostream>
-
 #include <cstdio>
 #include <exception>
-#include <cstring>
 #include <sstream>
-
 #include <sys/ioctl.h>
+#include <string>
 
 class SerialException : public std::exception{
     public:
@@ -126,16 +123,9 @@ private:
     long getBaudRateFlag(int);
     
     // Private Attributes
-    bool rawOutput;
-    bool blockUntilRead;
-    bool softwareFlowControl;
-    bool hardwareFlowControl;
-    
-    bool flagsSetted;
     bool connectedOnce;
     bool connected;
     
-    bool deviceSetted;
     std::string device;
     
     int fileDescriptor;
